@@ -1,6 +1,6 @@
 # Canvas API Test
 
-This project is designed to test the functionality of the Canvas API.
+This project is a Boilerplate for the Canvas API vector graphics projects.
 
 ## Getting Started
 
