@@ -13,7 +13,7 @@ This project is designed to test the functionality of the Canvas API.
 
 1. Clone the repository:
     ```sh
-    git clone https://github.com/yourusername/canvasapitest.git
+    git clone https://github.com/Suman9054/canvasapitest.git
     ```
 2. Navigate to the project directory:
     ```sh
