@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        #toolbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 50px;
+            background: #333;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 10px;
+        }
+        .tool-btn {
+            padding: 8px 16px;
+            cursor: pointer;
+            background: #444;
+            border: none;
+            border-radius: 4px;
+            color: white;
+        }
+        .tool-btn.active {
+            background: #555;
+        }
+        #canvas {
+            position: absolute;
+            top: 50px;
+            left: 0;
+        }
+        #text-input {
+            position: fixed;
+            display: none;
+            padding: 5px;
+            font-family: Arial;
+            font-size: 16px;
+            border: 1px solid #999;
+            background: white;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="toolbar">
+        <button class="tool-btn active" data-tool="select">Select</button>
+        <button class="tool-btn" data-tool="rectangle">▭</button>
+        <button class="tool-btn" data-tool="circle">◯</button>
+        <button class="tool-btn" data-tool="triangle">▷</button>
+        <button class="tool-btn" data-tool="text">T</button>
+        <input type="color" id="colorPicker" value="#000000">
+        <input type="range" id="strokeWidth" min="1" max="20" value="2">
+        <button class="tool-btn" id="clear">Clear</button>
+    </div>
+    <canvas id="canvas"></canvas>
+    <input type="text" id="text-input">
+    <script src="script.js"></script>
+</body>
+</html>
