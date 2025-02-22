@@ -1,7 +1,17 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="" />
+    <title>canvaspro</title>
     <style>
+        body {
+            margin: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
         #toolbar {
             position: fixed;
             top: 0;
@@ -14,6 +24,7 @@
             padding: 0 20px;
             gap: 10px;
         }
+
         .tool-btn {
             padding: 8px 16px;
             cursor: pointer;
@@ -22,14 +33,17 @@
             border-radius: 4px;
             color: white;
         }
+
         .tool-btn.active {
             background: #555;
         }
+
         #canvas {
             position: absolute;
             top: 50px;
             left: 0;
         }
+
         #text-input {
             position: fixed;
             display: none;
@@ -40,6 +54,18 @@
             background: white;
             z-index: 1000;
         }
+
+        input[type="color"] {
+            width: 40px;
+            height: 30px;
+            padding: 0;
+            border: none;
+            border-radius: 4px;
+        }
+
+        input[type="range"] {
+            width: 100px;
+        }
     </style>
 </head>
 <body>
@@ -48,13 +74,528 @@
         <button class="tool-btn" data-tool="rectangle">▭</button>
         <button class="tool-btn" data-tool="circle">◯</button>
         <button class="tool-btn" data-tool="triangle">▷</button>
+        <button class="tool-btn" data-tool="line">━</button>
+        <button class="tool-btn" data-tool="star">★</button>
+        <button class="tool-btn" data-tool="heart">♥</button>
+        <button class="tool-btn" data-tool="pentagon">⬠</button>
+        <button class="tool-btn" data-tool="arrow">➜</button>
+        <button class="tool-btn" data-tool="freehand">✎</button>
         <button class="tool-btn" data-tool="text">T</button>
         <input type="color" id="colorPicker" value="#000000">
         <input type="range" id="strokeWidth" min="1" max="20" value="2">
+        <button class="tool-btn" id="fillBtn">Fill</button>
         <button class="tool-btn" id="clear">Clear</button>
+        <button class="tool-btn" id="undo">Undo</button>
+        <button class="tool-btn" id="redo">Redo</button>
     </div>
     <canvas id="canvas"></canvas>
     <input type="text" id="text-input">
-    <script src="script.js"></script>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const textInput = document.getElementById('text-input');
+        const colorPicker = document.getElementById('colorPicker');
+        const strokeWidth = document.getElementById('strokeWidth');
+        const fillBtn = document.getElementById('fillBtn');
+
+        // Set canvas size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight - 50;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // State
+        let shapes = [];
+        let currentTool = 'select';
+        let isDrawing = false;
+        let selectedShape = null;
+        let startX, startY;
+        let isDragging = false;
+        let isRotating = false;
+        let rotationStartAngle = 0;
+        const undoStack = [];
+        const redoStack = [];
+
+        // Shape class
+        class Shape {
+            constructor(type, x, y, width, height, color, strokeWidth) {
+                this.type = type;
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+                this.color = color;
+                this.strokeWidth = strokeWidth;
+                this.points = []; // For freehand drawing
+                this.fill = false;
+                this.rotation = 0;
+            }
+
+            draw() {
+                ctx.save();
+                if (this.rotation) {
+                    ctx.translate(this.x + this.width/2, this.y + this.height/2);
+                    ctx.rotate(this.rotation);
+                    ctx.translate(-(this.x + this.width/2), -(this.y + this.height/2));
+                }
+
+                ctx.strokeStyle = this.color;
+                ctx.fillStyle = this.color;
+                ctx.lineWidth = this.strokeWidth;
+                ctx.beginPath();
+
+                switch (this.type) {
+                    case 'rectangle':
+                        ctx.rect(this.x, this.y, this.width, this.height);
+                        break;
+
+                    case 'circle':
+                        const radius = Math.min(Math.abs(this.width), Math.abs(this.height)) / 2;
+                        ctx.arc(
+                            this.x + this.width / 2,
+                            this.y + this.height / 2,
+                            radius,
+                            0,
+                            Math.PI * 2
+                        );
+                        break;
+
+                    case 'triangle':
+                        ctx.moveTo(this.x + this.width / 2, this.y);
+                        ctx.lineTo(this.x + this.width, this.y + this.height);
+                        ctx.lineTo(this.x, this.y + this.height);
+                        ctx.closePath();
+                        break;
+
+                    case 'line':
+                        ctx.moveTo(this.x, this.y);
+                        ctx.lineTo(this.x + this.width, this.y + this.height);
+                        break;
+
+                    case 'star':
+                        this.drawStar();
+                        break;
+
+                    case 'heart':
+                        this.drawHeart();
+                        break;
+
+                    case 'pentagon':
+                        this.drawPentagon();
+                        break;
+
+                    case 'arrow':
+                        this.drawArrow();
+                        break;
+
+                    case 'freehand':
+                        if (this.points.length > 0) {
+                            ctx.moveTo(this.points[0].x, this.points[0].y);
+                            for (let i = 1; i < this.points.length; i++) {
+                                ctx.lineTo(this.points[i].x, this.points[i].y);
+                            }
+                        }
+                        break;
+
+                    case 'text':
+                        ctx.fillStyle = this.color;
+                        ctx.font = `${this.strokeWidth * 8}px Arial`;
+                        ctx.fillText(this.text, this.x, this.y + 20);
+                        break;
+                }
+
+                if (this.type !== 'text') {
+                    ctx.stroke();
+                    if (this.fill) {
+                        ctx.fill();
+                    }
+                }
+
+                if (this === selectedShape) {
+                    this.drawSelectionBox();
+                }
+
+                ctx.restore();
+            }
+
+            drawStar() {
+                const centerX = this.x + this.width / 2;
+                const centerY = this.y + this.height / 2;
+                const spikes = 5;
+                const outerRadius = Math.min(Math.abs(this.width), Math.abs(this.height)) / 2;
+                const innerRadius = outerRadius / 2;
+
+                let rot = Math.PI / 2 * 3;
+                let step = Math.PI / spikes;
+
+                ctx.moveTo(centerX, centerY - outerRadius);
+
+                for (let i = 0; i < spikes; i++) {
+                    ctx.lineTo(
+                        centerX + Math.cos(rot) * outerRadius,
+                        centerY + Math.sin(rot) * outerRadius
+                    );
+                    rot += step;
+
+                    ctx.lineTo(
+                        centerX + Math.cos(rot) * innerRadius,
+                        centerY + Math.sin(rot) * innerRadius
+                    );
+                    rot += step;
+                }
+                ctx.lineTo(centerX, centerY - outerRadius);
+                ctx.closePath();
+            }
+
+            drawHeart() {
+                const centerX = this.x + this.width / 2;
+                const centerY = this.y + this.height / 2;
+                const size = Math.min(Math.abs(this.width), Math.abs(this.height)) / 2;
+
+                ctx.moveTo(centerX, centerY + size);
+                
+                // Left curve
+                ctx.bezierCurveTo(
+                    centerX - size, centerY + size / 2,
+                    centerX - size, centerY - size / 2,
+                    centerX, centerY - size
+                );
+                
+                // Right curve
+                ctx.bezierCurveTo(
+                    centerX + size, centerY - size / 2,
+                    centerX + size, centerY + size / 2,
+                    centerX, centerY + size
+                );
+            }
+
+            drawPentagon() {
+                const centerX = this.x + this.width / 2;
+                const centerY = this.y + this.height / 2;
+                const size = Math.min(Math.abs(this.width), Math.abs(this.height)) / 2;
+                const vertices = 5;
+                
+                ctx.moveTo(centerX + size * Math.cos(0), centerY + size * Math.sin(0));
+                
+                for (let i = 1; i <= vertices; i++) {
+                    const angle = (i * 2 * Math.PI) / vertices;
+                    ctx.lineTo(
+                        centerX + size * Math.cos(angle),
+                        centerY + size * Math.sin(angle)
+                    );
+                }
+                ctx.closePath();
+            }
+
+            drawArrow() {
+                const headLength = Math.min(Math.abs(this.width), Math.abs(this.height)) / 4;
+                const angle = Math.atan2(this.height, this.width);
+                
+                // Draw the main line
+                ctx.moveTo(this.x, this.y);
+                ctx.lineTo(this.x + this.width, this.y + this.height);
+                
+                // Draw the arrowhead
+                ctx.lineTo(
+                    this.x + this.width - headLength * Math.cos(angle - Math.PI / 6),
+                    this.y + this.height - headLength * Math.sin(angle - Math.PI / 6)
+                );
+                ctx.moveTo(this.x + this.width, this.y + this.height);
+                ctx.lineTo(
+                    this.x + this.width - headLength * Math.cos(angle + Math.PI / 6),
+                    this.y + this.height - headLength * Math.sin(angle + Math.PI / 6)
+                );
+            }
+
+            drawSelectionBox() {
+                ctx.strokeStyle = '#00f';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(this.x, this.y, this.width, this.height);
+                ctx.setLineDash([]);
+            }
+
+            contains(x, y) {
+                return x >= this.x && x <= this.x + this.width &&
+                       y >= this.y && y <= this.y + this.height;
+            }
+        }
+
+        // Tool selection
+        document.querySelectorAll('.tool-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                if (e.target.id === 'clear') {
+                    undoStack.push([...shapes]);
+                    shapes = [];
+                    redraw();
+                    return;
+                }
+                if (e.target.id === 'undo') {
+                    undo();
+                    return;
+                }
+                if (e.target.id === 'redo') {
+                    redo();
+                    return;
+                }
+                if (e.target.id === 'fillBtn') {
+                    e.target.classList.toggle('active');
+                    if (selectedShape) {
+                        selectedShape.fill = !selectedShape.fill;
+                        redraw();
+                    }
+                    return;
+                }
+                document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentTool = btn.dataset.tool;
+                selectedShape = null;
+                redraw();
+            });
+        });
+
+        // Drawing functions
+        function startDrawing(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (e.altKey && selectedShape) {
+                isRotating = true;
+                const centerX = selectedShape.x + selectedShape.width / 2;
+                const centerY = selectedShape.y + selectedShape.height / 2;
+                rotationStartAngle = Math.atan2(
+                    e.clientY - centerY,
+                    e.clientX - centerX
+                );
+                e.preventDefault();
+                return;
+            }
+
+            if (currentTool === 'select') {
+                const clickedShape = shapes.find(s => s.contains(x, y));
+                if (clickedShape) {
+                    selectedShape = clickedShape;
+                    isDragging = true;
+                    startX = x - clickedShape.x;
+                    startY = y - clickedShape.y;
+                } else {
+                    selectedShape = null;
+                }
+                redraw();
+                return;
+            }
+
+            if (currentTool === 'text') {
+                textInput.style.display = 'block';
+                textInput.style.left = e.clientX + 'px';
+                textInput.style.top = e.clientY + 'px';
+                textInput.focus();
+                return;
+            }
+
+            isDrawing = true;
+            startX = x;
+            startY = y;
+        }
+
+        function draw(e) {
+            if (!isDrawing && !isDragging && !isRotating) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (isRotating && selectedShape) {
+                const centerX = selectedShape.x + selectedShape.width / 2;
+                const centerY = selectedShape.y + selectedShape.height / 2;
+                const currentAngle = Math.atan2(
+                    e.clientY - centerY,
+                    e.clientX - centerX
+                );
+                selectedShape.rotation = currentAngle - rotationStartAngle;
+                redraw();
+                return;
+            }
+
+            if (isDragging && selectedShape) {
+                selectedShape.x = x - startX;
+                selectedShape.y = y - startY;
+                redraw();
+                return;
+            }
+
+            if (isDrawing) {
+                if (currentTool === 'freehand') {
+                    if (!shapes.length || shapes[shapes.length - 1].type !== 'freehand') {
+                        const newShape = new Shape(
+                            'freehand',
+                            x,
+                            y,
+                            0,
+                            0,
+                            colorPicker.value,
+                            strokeWidth.value
+                        );
+                        newShape.points.push({x, y});
+                        shapes.push(newShape);
+                    } else {
+                        shapes[shapes.length - 1].points.push({x, y});
+                    }
+                    redraw();
+                } else if (currentTool !== 'select' && currentTool !== 'text') {
+                    redraw();
+                    const width = x - startX;
+                    const height = y - startY;
+                    const shape = new Shape(
+                        currentTool,
+                        startX,
+                        startY,
+                        width,
+                        height,
+                        colorPicker.value,
+                        strokeWidth.value
+                    );
+                    shape.fill = fillBtn.classList.contains('active');
+                    shape.draw();
+                }
+            }
+        }
+
+        function stopDrawing() {
+            if (isDrawing && currentTool !== 'select' && currentTool !== 'text') {
+                const rect = canvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+                const width = x - startX;
+                const height = y - startY;
+                
+                if (currentTool !== 'freehand') {
+                    const shape = new Shape(
+                        currentTool,
+                        startX,
+                        startY,
+                        width,
+                        height,
+                        colorPicker.value,
+                        strokeWidth.value
+                    );
+                    shape.fill = fillBtn.classList.contains('active');
+                    shapes.push(shape);
+                    undoStack.push([...shapes]);
+                    redoStack.length = 0;
+                }
+            }
+            isDrawing = false;
+            isDragging = false;
+            isRotating = false;
+        }
+
+        function undo() {
+            if (undoStack.length > 0) {
+                redoStack.push([...shapes]);
+                shapes = undoStack.pop();
+                selectedShape = null;
+                redraw();
+            }
+        }
+
+        function redo() {
+            if (redoStack.length > 0) {
+                undoStack.push([...shapes]);
+                shapes = redoStack.pop();
+                selectedShape = null;
+                redraw();
+            }
+        }
+
+        function redraw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            shapes.forEach(shape => shape.draw());
+        }
+
+        // Text input handling
+        textInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const text = textInput.value;
+                if (text) {
+                    const shape = new Shape(
+                        'text',
+                        parseInt(textInput.style.left) - canvas.offsetLeft,
+                        parseInt(textInput.style.top) - canvas.offsetTop,
+                        0,
+                        0,
+                        colorPicker.value,
+                        strokeWidth.value
+                    );
+                    shape.text = text;
+                    shapes.push(shape);
+                    undoStack.push([...shapes]);
+                    redoStack.length = 0;
+                    redraw();
+                }
+                textInput.value = '';
+                textInput.style.display = 'none';
+            }
+        });
+
+        // Keyboard shortcuts
+        window.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'z') {
+                undo();
+            }
+            if (e.ctrlKey && e.key === 'y') {
+                redo();
+            }
+            if (e.key === 'Delete' && selectedShape) {
+                undoStack.push([...shapes]);
+                shapes = shapes.filter(s => s !== selectedShape);
+                selectedShape = null;
+                redoStack.length = 0;
+                redraw();
+            }
+            // Tool shortcuts
+            if (e.key === 'r') selectTool('rectangle');
+            if (e.key === 'c') selectTool('circle');
+            if (e.key === 't') selectTool('text');
+            if (e.key === 's') selectTool('select');
+            if (e.key === 'l') selectTool('line');
+            if (e.key === 'p') selectTool('pentagon');
+            if (e.key === 'h') selectTool('heart');
+            if (e.key === 'f') selectTool('freehand');
+        });
+
+        function selectTool(tool) {
+            document.querySelector(`[data-tool="${tool}"]`).click();
+        }
+
+        // Event listeners
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+
+        // Touch support
+        canvas.addEventListener('touchstart', handleTouch);
+        canvas.addEventListener('touchmove', handleTouch);
+        canvas.addEventListener('touchend', stopDrawing);
+
+        function handleTouch(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent(
+                e.type === 'touchstart' ? 'mousedown' : 'mousemove',
+                {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                }
+            );
+            if (e.type === 'touchstart') startDrawing(mouseEvent);
+            else if (e.type === 'touchmove') draw(mouseEvent);
+        }
+    </script>
 </body>
 </html>
